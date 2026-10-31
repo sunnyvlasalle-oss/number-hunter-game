@@ -1,0 +1,240 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Play Number Hunter, a free number-finding speed game. Find targets and beat the clock!">
+<title>Number Hunter — Find It Fast</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;min-height:100vh;padding:18px;
+ display:flex;align-items:center;justify-content:center;
+ font-family:Arial,sans-serif;color:white;
+ background:radial-gradient(circle at top,#263766,#11152a 70%)
+}
+.game{width:100%;max-width:500px;text-align:center}
+h1{font-size:clamp(2rem,8vw,3rem);margin:0 0 8px}
+.subtitle{color:#bec8e8;margin:0 0 22px}
+.panel{
+ background:#ffffff0d;border:1px solid #ffffff20;
+ border-radius:22px;padding:22px;box-shadow:0 15px 45px #0005
+}
+.stats{display:flex;gap:10px;margin-bottom:18px}
+.stat{flex:1;padding:11px 4px;background:#ffffff0d;border-radius:12px}
+.stat small{display:block;color:#bec8e8;margin-bottom:5px}
+.stat strong{font-size:1.35rem}
+.target{
+ padding:15px;border-radius:14px;background:#111a35;
+ margin:15px 0;color:#bec8e8
+}
+.target strong{display:block;font-size:2.5rem;color:#65f3d1;margin-top:5px}
+.timer{height:8px;background:#ffffff20;border-radius:10px;overflow:hidden}
+.bar{height:100%;width:100%;background:#65f3d1;transition:width .1s linear}
+.grid{
+ display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
+ gap:8px;margin:20px 0
+}
+.number{
+ aspect-ratio:1;border:1px solid #ffffff18;border-radius:11px;
+ background:#ffffff0b;color:#fff;font-size:clamp(1rem,4vw,1.4rem);
+ font-weight:bold;cursor:pointer;touch-action:manipulation
+}
+.number:active{transform:scale(.94)}
+.number.found{background:#65f3d1;color:#10192b;border-color:#65f3d1}
+.number:disabled{cursor:default}
+.status{min-height:27px;font-weight:bold;margin:12px 0}
+.primary{
+ width:100%;padding:15px;border:0;border-radius:12px;
+ background:#65f3d1;color:#10192b;font-size:1rem;
+ font-weight:bold;cursor:pointer
+}
+.hidden{display:none!important}
+.help{font-size:.87rem;color:#bec8e8;line-height:1.5}
+.footer{font-size:.8rem;color:#8794bc;margin-top:18px}
+</style>
+</head>
+<body>
+<main class="game">
+ <h1>🔎 Number Hunter</h1>
+ <p class="subtitle">Spot the number. Beat the clock.</p>
+
+ <section class="panel">
+  <div class="stats">
+   <div class="stat"><small>⭐ Score</small><strong id="score">0</strong></div>
+   <div class="stat"><small>⚡ Level</small><strong id="level">1</strong></div>
+   <div class="stat"><small>🏆 Best</small><strong id="best">0</strong></div>
+  </div>
+
+  <div class="timer"><div class="bar" id="bar"></div></div>
+  <div class="target">
+   FIND THIS NUMBER
+   <strong id="target">7</strong>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="status" id="status" aria-live="polite">Ready to hunt?</div>
+  <button class="primary" id="start">START HUNT ▶</button>
+  <button class="primary hidden" id="share">SHARE YOUR SCORE 📲</button>
+  <p class="help">Tap the target number in the grid. Find every matching target before time runs out. The grid gets larger as you level up!</p>
+ </section>
+ <p class="footer">Fast eyes win. Don't let the numbers fool you!</p>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const grid=$("grid");
+const GAME_SECONDS=30;
+
+let score=0,level=1,best=Number(localStorage.getItem("numberHunterBest")||0);
+let timeLeft=GAME_SECONDS,playing=false,locked=false;
+let timer=null,roundTimer=null,roundId=0;
+let target=7,found=0,roundPoints=0,gridSize=15;
+
+$("best").textContent=best;
+
+function shuffle(arr){
+ const result=[...arr];
+ for(let i=result.length-1;i>0;i--){
+  const j=Math.floor(Math.random()*(i+1));
+  [result[i],result[j]]=[result[j],result[i]];
+ }
+ return result;
+}
+
+function updateStats(){
+ $("score").textContent=score;
+ $("level").textContent=level;
+ $("best").textContent=best;
+}
+
+function newRound(){
+ if(!playing)return;
+ locked=false;
+ roundId++;
+ found=0;
+
+ // Every few points, increase the number of tiles.
+ level=1+Math.floor(score/50);
+ gridSize=Math.min(25,15+Math.floor((level-1)/2)*5);
+ const count=gridSize;
+
+ target=Math.floor(Math.random()*9)+1;
+ $("target").textContent=target;
+ $("level").textContent=level;
+ grid.style.gridTemplateColumns=`repeat(${Math.ceil(Math.sqrt(count))},minmax(0,1fr))`;
+ grid.innerHTML="";
+
+ const values=[];
+ for(let i=0;i<count;i++){
+  values.push(Math.floor(Math.random()*9)+1);
+ }
+
+ // Ensure the target is present, and at least one distractor differs.
+ values[Math.floor(Math.random()*count)]=target;
+ if(values.every(v=>v===target))values[0]=target===9?1:target+1;
+
+ shuffle(values).forEach(value=>{
+  const button=document.createElement("button");
+  button.className="number";
+  button.textContent=value;
+  button.setAttribute("aria-label","Number "+value);
+  button.addEventListener("click",()=>selectNumber(button,value));
+  grid.appendChild(button);
+ });
+
+ roundPoints=10;
+ $("status").textContent="Find every "+target+"!";
+ $("status").style.color="#fff";
+}
+
+function selectNumber(button,value){
+ if(!playing||locked||button.disabled)return;
+
+ if(value===target){
+  button.classList.add("found");
+  button.disabled=true;
+  found++;
+  score+=10;
+  if(score>best){
+   best=score;
+   localStorage.setItem("numberHunterBest",String(best));
+  }
+  updateStats();
+
+  const targets=[...grid.children].filter(b=>Number(b.textContent)===target);
+  if(targets.every(b=>b.disabled)){
+   locked=true;
+   $("status").textContent="🎯 Target cleared! Next round!";
+   $("status").style.color="#65f3d1";
+   clearTimeout(roundTimer);
+   roundTimer=setTimeout(()=>{if(playing)newRound()},350);
+  }else{
+   $("status").textContent="✅ Nice! Keep hunting!";
+   $("status").style.color="#65f3d1";
+  }
+ }else{
+  score=Math.max(0,score-5);
+  updateStats();
+  button.animate(
+   [{transform:"translateX(0)"},{transform:"translateX(-4px)"},{transform:"translateX(4px)"},{transform:"translateX(0)"}],
+   {duration:180}
+  );
+  $("status").textContent="❌ Wrong number! -5 points";
+  $("status").style.color="#ff8c9e";
+ }
+}
+
+function endGame(){
+ if(!playing)return;
+ playing=false;
+ clearInterval(timer);
+ clearTimeout(roundTimer);
+ [...grid.children].forEach(b=>b.disabled=true);
+ $("target").textContent="🏁";
+ $("status").style.color="#fff";
+ $("status").textContent="Time's up! Final score: "+score;
+ $("start").textContent="PLAY AGAIN ↻";
+ $("start").classList.remove("hidden");
+ $("share").classList.remove("hidden");
+ $("bar").style.width="0%";
+ updateStats();
+}
+
+function startGame(){
+ clearInterval(timer);
+ clearTimeout(roundTimer);
+ score=0;level=1;timeLeft=GAME_SECONDS;
+ playing=true;locked=false;
+ $("start").classList.add("hidden");
+ $("share").classList.add("hidden");
+ $("bar").style.width="100%";
+ updateStats();
+ newRound();
+
+ timer=setInterval(()=>{
+  timeLeft=Math.max(0,timeLeft-.1);
+  $("bar").style.width=(timeLeft/GAME_SECONDS*100)+"%";
+  if(timeLeft<=0)endGame();
+ },100);
+}
+
+$("start").addEventListener("click",startGame);
+
+$("share").addEventListener("click",async()=>{
+ const message="I scored "+score+" points in Number Hunter 🔎 Can you beat me?";
+ try{
+  if(navigator.share){
+   await navigator.share({title:"Number Hunter",text:message});
+  }else{
+   await navigator.clipboard.writeText(message);
+   $("status").textContent="Score copied! Challenge a friend.";
+  }
+ }catch(e){
+  $("status").textContent=message;
+ }
+});
+</script>
+</body>
+</html>
